@@ -4,7 +4,7 @@
   "suite": "app-e2e",
   "equipo": "QE",
   "nivel": "e2e-dispositivo",
-  "repositorio": "",
+  "repositorio": "https://github.com/FernandoTribal/qira-demo-video.git",
   "contacto": "",
   "sistemas": [
     "app-ios"
