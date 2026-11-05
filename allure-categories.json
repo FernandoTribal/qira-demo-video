@@ -1,0 +1,44 @@
+[
+  {
+    "name": "Defecto conocido y fijado",
+    "matchedStatuses": [
+      "failed",
+      "skipped"
+    ],
+    "messageRegex": "(?si).*(\\bxfail\\b|expected failure|\\bBUG\\b).*"
+  },
+  {
+    "name": "Defecto de producto",
+    "matchedStatuses": [
+      "failed"
+    ]
+  },
+  {
+    "name": "Problema de ambiente",
+    "matchedStatuses": [
+      "broken"
+    ],
+    "messageRegex": ".*(Connection refused|timed out|timeout|no such device|WebDriverException|SessionNotCreated|adb).*"
+  },
+  {
+    "name": "No ejecutado a propósito",
+    "matchedStatuses": [
+      "skipped"
+    ],
+    "messageRegex": "(?s).*\\bdeliberado:.*"
+  },
+  {
+    "name": "Bloqueado por el ambiente",
+    "matchedStatuses": [
+      "skipped"
+    ],
+    "messageRegex": "(?s).*\\bambiente:.*"
+  },
+  {
+    "name": "Bloqueado por un dato que falta",
+    "matchedStatuses": [
+      "skipped"
+    ],
+    "messageRegex": "(?s).*\\bdependencia:.*"
+  }
+]

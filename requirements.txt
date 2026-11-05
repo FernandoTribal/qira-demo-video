@@ -1,0 +1,17 @@
+# Versiones FIJAS (principio 6): el entorno se reconstruye igual en cualquier
+# máquina, y un rojo no depende del día en que alguien instaló.
+
+# El cliente de Appium y su transporte.
+Appium-Python-Client==5.3.1
+selenium==4.36.0
+
+pytest==8.4.2
+# Reintento ACOTADO a fallas de infraestructura (§6.6): reintentar un fallo
+# funcional esconde un defecto real detrás de un verde.
+pytest-rerunfailures==16.0.1
+
+# El crudo del §6. Se entrega `allure-results/`, no el reporte generado.
+allure-pytest==2.16.0
+
+# `.env` y `.env.<AMBIENTE>` (core/config.py).
+python-dotenv==1.1.1

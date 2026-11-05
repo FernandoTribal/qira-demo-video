@@ -1,0 +1,168 @@
+// La receta de las corridas automáticas de APP-MOVIL-DEMO · e2e de dispositivo (Anexo A.4).
+//
+// Vive en el repositorio del proyecto y no en el de la infraestructura: si
+// cambia `run.sh` o se agrega una suite, la receta cambia en el MISMO commit.
+
+pipeline {
+  // Una CAPACIDAD, nunca un equipo, y una por plataforma: Android corre en el
+  // emulador y iOS en el simulador de una Mac con Xcode. Con una sola etiqueta
+  // para las dos, una corrida iOS caía en el agente del emulador Android y,
+  // si esa máquina no tenía Xcode, fallaba lejos de la causa (2026-11-04).
+  //
+  // Tienen que ser etiquetas que un agente DECLARE de verdad (en QORA,
+  // `labelString` del agente en `configuracion/jenkins.yaml` de PipelineQA:
+  // hoy `android-emulator` e `ios-simulador`). Una etiqueta que nadie declara
+  // deja la corrida en cola para siempre, sin error.
+  agent { label params.PLATAFORMA == 'ios' ? 'ios-simulador' : 'android-emulator' }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '50'))
+    timeout(time: 3, unit: 'HOURS')   // techo de seguridad, no expectativa
+  }
+
+  parameters {
+    // `despertar` va PRIMERA y NO es una suite: deja registrados estos
+    // parámetros y sale sin correr ni entregar nada (§8). Se lleva el
+    // «Construir ahora» de un trabajo recién creado. Que siga primera lo vigila
+    // `tests_unit/test_coherencia.py`.
+    choice(name: 'SUITE', choices: ['despertar', 'humo', 'regresion', 'completa'],
+           description: 'Qué correr. La primera no corre nada: sirve para que la plataforma recupere este desplegable sin tocar el ambiente.')
+    choice(name: 'PLATAFORMA', choices: ['android', 'ios'],
+           description: 'Contra qué se corre. <code>ios</code> corre en el simulador de una Mac con Xcode.')
+    // Una casilla que promete detener algo y no está cableada es peor que no
+    // tenerla (§13.9): la conecta el `--efectos` de la etapa `Suite`.
+    booleanParam(name: 'PERMITIR_EFECTOS', defaultValue: false,
+           description: 'Deja correr los casos que escriben en el producto. Marcar sólo a sabiendas.')
+    string(name: 'EXTRA', defaultValue: '',
+           description: 'Argumentos extra para el runner. Ej: <code>-k inicio</code>')
+  }
+
+  environment {
+    // Para qué se corre, al manifiesto (§6.2.1): el mismo valor que elige qué
+    // correr y que nombra la carpeta de entrega, pero como dato declarado.
+    PROPOSITO = "${params.SUITE}"
+    // A `run.sh` y al manifiesto por la misma puerta: si sólo lo supiera la
+    // receta, se correría en un aparato y se entregaría como el otro.
+    PLATAFORMA = "${params.PLATAFORMA}"
+  }
+
+  stages {
+    stage('Despertar') {
+      when { expression { params.SUITE == 'despertar' } }
+      steps {
+        echo 'Despertar: los parámetros ya quedaron registrados. No se corre nada.'
+      }
+    }
+
+    stage('Preparar') {
+      when { expression { params.SUITE != 'despertar' } }
+      steps {
+        sh 'git log -1 --oneline'
+        // Un clon limpio NO trae `.env`: son credenciales. Las entrega el CI y
+        // se borran en `cleanup`, pase lo que pase.
+        withCredentials([file(credentialsId: 'app-movil-demo-dotenv', variable: 'DOTENV')]) {
+          sh 'cp "$DOTENV" .env && chmod 600 .env'
+        }
+        sh './run.sh --preparar'
+      }
+    }
+
+    stage('Coherencia') {
+      when { expression { params.SUITE != 'despertar' } }
+      // Barato y sin dispositivo: si la suite no se puede ni listar, no tiene
+      // sentido tocar un teléfono para averiguarlo.
+      steps {
+        sh './run.sh --suites'
+        sh './run.sh --unitarias'
+      }
+    }
+
+    stage('Suite') {
+      when { expression { params.SUITE != 'despertar' } }
+      steps {
+        script {
+          def efectos = params.PERMITIR_EFECTOS ? ' --efectos' : ''
+          def sueltos = params.EXTRA?.trim() ? ' ' + params.EXTRA.trim() : ''
+          def comando = "./run.sh ${params.SUITE}${efectos}${sueltos} --junitxml=reports/junit.xml"
+          // El candado se llama como el RECURSO (el aparato), no como la
+          // máquina, y hay uno por plataforma: el emulador Android y el
+          // simulador iOS son dos aparatos, y con un solo candado una corrida
+          // iOS esperaba sin motivo a una Android (y al revés). ⚠️ La otra
+          // mitad es declararlos en la plataforma: si no, el gestor los
+          // inventa al vuelo y se pierden en cada reinicio (§8).
+          //
+          // Los comparten todos los proyectos que corren en ese agente: con un
+          // candado propio por proyecto, dos suites se pisarían la app y la
+          // sesión en el mismo aparato (pasó el 2026-10-26). Van literales y
+          // entre comillas simples: `./jefe.sh comprobar` sólo cruza nombres
+          // escritos así, y lee también los comentarios (no citar acá la
+          // llamada). Un proyecto con un aparato PROPIO declara el suyo en la
+          // plataforma y lo pide por su nombre.
+          if (params.PLATAFORMA == 'ios') {
+            lock('dispositivo-ios-simulador') { sh comando }
+          } else {
+            lock('dispositivo-android-emulador') { sh comando }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      script {
+        // Todo tras la condición, no sólo la entrega: una carpeta vacía es peor
+        // que ninguna, quien acumula publicaría una corrida fantasma (§8).
+        if (params.SUITE == 'despertar') {
+          echo 'Despertar: no hay resultados que publicar ni corrida que entregar.'
+        } else {
+          junit allowEmptyResults: true, testResults: 'reports/junit.xml'
+          // El detalle de ESTA corrida. El histórico no es suyo (§7).
+          allure includeProperties: false, results: [[path: 'reports/allure-results']]
+          archiveArtifacts artifacts: 'reports/allure-results/**', allowEmptyArchive: true
+
+          // UNA CARPETA POR SUITE Y PLATAFORMA: con una común, la chica y verde
+          // tapa a la grande con rojos. `ENTREGAS` la declara la MÁQUINA; si no
+          // está, se salta y la corrida sigue siendo válida.
+          if (env.ENTREGAS) {
+            // La `suite` se LEE de `suite.base.json`, no se escribe acá: el
+            // manifiesto y la carpeta de entrega tienen que decir lo mismo, y
+            // con el nombre fijo en la receta divergieron en silencio
+            // (`movil-e2e` acá, `app-e2e` en el manifiesto, 2026-10-26).
+            def suiteBase = sh(returnStdout: true, script:
+              "python3 -c 'import json; print(json.load(open(\"suite.base.json\"))[\"suite\"])'").trim()
+            withEnv(["FUENTE=app-movil-demo-${suiteBase}-${params.PLATAFORMA}-${params.SUITE}"]) {
+              sh '''
+                destino="$ENTREGAS/$FUENTE"
+                rm -rf "$destino" && mkdir -p "$destino"
+                cp -R reports/allure-results/. "$destino"/
+                echo "Entregado como fuente '$FUENTE'."
+              '''
+              // `CARGADOR_ENTREGAS` es la MISMA carpeta vista desde quien carga,
+              // casi nunca la misma ruta. Y un post-proceso nunca falla una
+              // corrida buena: se mira el código en vez de dejar que `sh` lance.
+              if (env.CARGADOR && env.CARGADOR_ENTREGAS) {
+                def codigo = sh(returnStatus: true, script: '''
+                  docker exec "$CARGADOR" python3 -m normalizador cargar \
+                    "$CARGADOR_ENTREGAS/$FUENTE" --fuente-id "$FUENTE"
+                ''')
+                if (codigo != 0) {
+                  echo "No la tomó (código ${codigo}). Quedó entregada: la recoge la pasada automática."
+                }
+              } else {
+                echo 'Esta máquina no declara a quién avisarle: la recoge el sondeo.'
+              }
+            }
+          } else {
+            echo 'Esta máquina no declara ENTREGAS: no se entrega a nadie.'
+          }
+        }
+      }
+    }
+    cleanup {
+      sh 'rm -f .env'   // que las credenciales no vivan en el workspace
+    }
+  }
+}

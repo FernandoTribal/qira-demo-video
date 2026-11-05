@@ -1,0 +1,24 @@
+{
+  "areas": {
+    "LTQ-1025": "DEMO"
+  },
+  "casos": {
+    "TC_01": "CP-DEMO-01",
+    "TC_02": "CP-DEMO-02",
+    "TC_03": "CP-DEMO-03",
+    "TC_04": "CP-DEMO-04",
+    "TC_05": "CP-DEMO-05",
+    "TC_06": "CP-DEMO-06",
+    "TC_07": "CP-DEMO-07",
+    "TC_08": "CP-DEMO-08",
+    "TC_09": "CP-DEMO-09",
+    "TC_10": "CP-DEMO-10",
+    "TC_11": "CP-DEMO-11",
+    "TC_12": "CP-DEMO-12",
+    "TC_13": "CP-DEMO-13",
+    "TC_14": "CP-DEMO-14",
+    "TC_15": "CP-DEMO-15",
+    "TC_16": "CP-DEMO-16",
+    "TC_17": "CP-DEMO-17"
+  }
+}

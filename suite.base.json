@@ -1,0 +1,12 @@
+{
+  "_comentario": "La parte estática del manifiesto (§6.2 de la guía). La creó QIRA; se edita a mano.",
+  "proyecto": "APP-MOVIL-DEMO",
+  "suite": "app-e2e",
+  "equipo": "QE",
+  "nivel": "e2e-dispositivo",
+  "repositorio": "",
+  "contacto": "",
+  "sistemas": [
+    "app-ios"
+  ]
+}

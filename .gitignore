@@ -1,0 +1,36 @@
+# El entorno de Python se reconstruye desde requirements.txt (principio 6).
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Lo que produce una corrida. El crudo se archiva desde el CI, no desde acá, y
+# se borra antes de cada corrida (§6.1).
+reports/
+
+# Credenciales: NUNCA al repositorio. En el CI llegan como secreto y se borran
+# al terminar. Sólo se versiona el ejemplo, sin valores.
+.env
+.env.*
+!.env.ejemplo
+
+# Los borradores que genera QIRA se REGENERAN: lo único que se versiona es el
+# mapa, que dice qué borrador salió de qué caso y es lo que no se puede volver
+# a sacar de ningún otro lado.
+/borradores/qira/*
+!/borradores/qira/mapa.json
+
+# El binario bajo prueba pesa y cambia con cada liberación: lo que se versiona
+# es su build en el manifiesto de cada corrida, no el archivo.
+*.apk
+*.aab
+*.ipa
+
+# Las guías canónicas viven en el directorio padre (TWW_GUIAS_QE). Una copia
+# acá miente en silencio el día que alguien actualice la de arriba.
+/ARQUITECTURA_QE.md
+/ADAPTACION_A_LA_INFRA.md
+/GUIA_PROYECTO_NUEVO.md
+/INFRAESTRUCTURA_QE.md
+
+.DS_Store
