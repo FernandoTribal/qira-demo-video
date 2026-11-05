@@ -34,3 +34,6 @@ reports/
 /INFRAESTRUCTURA_QE.md
 
 .DS_Store
+
+# El ayudante con el que QIRA mira la pantalla del dispositivo al armar casos.
+/.qira-pantalla/

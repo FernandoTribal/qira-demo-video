@@ -1,0 +1,30 @@
+{
+  "caso_id": "CP-DEMO-09",
+  "qira": "TC_09",
+  "filas": [
+    {
+      "nombre": "sin-dominio",
+      "valores": {
+        "correo": "usuario@",
+        "contrasena": "{rol: cliente}"
+      },
+      "esperado": "Se muestra «Escribe un correo válido.»"
+    },
+    {
+      "nombre": "sin-arroba",
+      "valores": {
+        "correo": "usuariodominio.com",
+        "contrasena": "{rol: cliente}"
+      },
+      "esperado": "Se muestra «Escribe un correo válido.»"
+    },
+    {
+      "nombre": "con-espacio",
+      "valores": {
+        "correo": "usuario @dominio.com",
+        "contrasena": "{rol: cliente}"
+      },
+      "esperado": "Se muestra «Escribe un correo válido.»"
+    }
+  ]
+}
