@@ -124,45 +124,104 @@ pipeline {
           archiveArtifacts artifacts: 'reports/allure-results/**', allowEmptyArchive: true
 
           // UNA CARPETA POR SUITE Y PLATAFORMA: con una común, la chica y verde
-          // tapa a la grande con rojos. `ENTREGAS` la declara la MÁQUINA; si no
-          // está, se salta y la corrida sigue siendo válida.
-          if (env.ENTREGAS) {
-            // La `suite` se LEE de `suite.base.json`, no se escribe acá: el
-            // manifiesto y la carpeta de entrega tienen que decir lo mismo, y
-            // con el nombre fijo en la receta divergieron en silencio
-            // (`movil-e2e` acá, `app-e2e` en el manifiesto, 2026-10-26).
-            def suiteBase = sh(returnStdout: true, script:
-              "python3 -c 'import json; print(json.load(open(\"suite.base.json\"))[\"suite\"])'").trim()
-            withEnv(["FUENTE=app-movil-demo-${suiteBase}-${params.PLATAFORMA}-${params.SUITE}"]) {
-              sh '''
-                destino="$ENTREGAS/$FUENTE"
-                rm -rf "$destino" && mkdir -p "$destino"
-                cp -R reports/allure-results/. "$destino"/
-                echo "Entregado como fuente '$FUENTE'."
-              '''
-              // `CARGADOR_ENTREGAS` es la MISMA carpeta vista desde quien carga,
-              // casi nunca la misma ruta. Y un post-proceso nunca falla una
-              // corrida buena: se mira el código en vez de dejar que `sh` lance.
-              if (env.CARGADOR && env.CARGADOR_ENTREGAS) {
-                def codigo = sh(returnStatus: true, script: '''
-                  docker exec "$CARGADOR" python3 -m normalizador cargar \
-                    "$CARGADOR_ENTREGAS/$FUENTE" --fuente-id "$FUENTE"
-                ''')
-                if (codigo != 0) {
-                  echo "No la tomó (código ${codigo}). Quedó entregada: la recoge la pasada automática."
-                }
-              } else {
-                echo 'Esta máquina no declara a quién avisarle: la recoge el sondeo.'
-              }
-            }
+          // tapa a la grande con rojos. La `suite` se LEE de `suite.base.json`,
+          // no se escribe acá: el manifiesto y la carpeta de entrega tienen que
+          // decir lo mismo, y con el nombre fijo en la receta divergieron en
+          // silencio (`movil-e2e` acá, `app-e2e` en el manifiesto, 2026-10-26).
+          //
+          // `|| true` y la pregunta de abajo: sin `suite.base.json` no hay con qué
+          // nombrar la entrega, y eso se dice; no tira el `post` entero. Cómo se
+          // entrega lo decide la máquina: ver `entregar` al final.
+          def suiteBase = sh(returnStdout: true, script:
+            "python3 -c 'import json; print(json.load(open(\"suite.base.json\"))[\"suite\"])' || true").trim()
+          if (suiteBase) {
+            entregar("app-movil-demo-${suiteBase}-${params.PLATAFORMA}-${params.SUITE}")
           } else {
-            echo 'Esta máquina no declara ENTREGAS: no se entrega a nadie.'
+            echo 'Falta suite.base.json (o no dice la suite): no se entrega a nadie.'
           }
         }
       }
     }
     cleanup {
       sh 'rm -f .env'   // que las credenciales no vivan en el workspace
+    }
+  }
+}
+
+// ── La entrega a QIVA ───────────────────────────────────────────────────────
+// Fuera del `pipeline` porque es la misma en las dos plantillas (móvil y web)
+// y en la receta de cada suite: un bloque igual en tres lugares del `post` es
+// el que se arregla en uno y se olvida en los otros.
+//
+// Cargar es `docker exec` al contenedor del cargador de QIVA, y eso sólo se
+// puede desde una máquina que comparte ese Docker. Hoy, el Mac (que declara
+// `CARGADOR`). Con el servidor, el Mac queda como agente REMOTO, sin el Docker
+// de QIVA: ahí los resultados viajan por el Controller (`stash`) hasta un nodo
+// con la etiqueta `qiva` —el del servidor, ver `docs/AGENTE.md` de PipelineQA—
+// y se cargan desde él con el mismo comando. Quien decide es la MÁQUINA (sus
+// variables de nodo), no la receta: la misma receta sirve en las dos.
+def entregar(String fuente) {
+  if (!fileExists('reports/allure-results')) {
+    echo 'No hay resultados que entregar: la corrida no llegó a la suite.'
+    return
+  }
+  if (env.CARGADOR) {
+    entregarDesdeAca(fuente)   // como siempre: esta máquina ve al cargador
+    return
+  }
+  stash name: 'entrega-qiva', includes: 'reports/allure-results/**', allowEmpty: true
+  // Con techo: si ningún nodo declara `qiva` (o están todos ocupados), la
+  // corrida no puede quedar en cola para siempre esperando un post-proceso. Y
+  // un post-proceso nunca falla una corrida buena: se avisa y se sigue.
+  try {
+    timeout(time: 30, unit: 'MINUTES') {
+      node('qiva') {
+        dir('entrega-qiva') {
+          deleteDir()   // lo de una corrida anterior no puede entrar con ésta
+          unstash 'entrega-qiva'
+          entregarDesdeAca(fuente)
+          deleteDir()
+        }
+      }
+    }
+  } catch (err) {
+    echo "No se entregó a QIVA (${err}). La corrida es válida, pero no va a " +
+         "aparecer en el tablero: ningún nodo «qiva» la tomó en 30 minutos."
+  }
+}
+
+// Copia a `ENTREGAS/<fuente>` y le avisa al cargador, en la máquina donde corre.
+def entregarDesdeAca(String fuente) {
+  // `ENTREGAS` la declara la MÁQUINA, no esta receta. Si no la declara, el
+  // paso se salta y la corrida sigue siendo válida.
+  if (!env.ENTREGAS) {
+    echo 'Esta máquina no declara ENTREGAS: no se entrega a nadie.'
+    return
+  }
+  withEnv(["FUENTE=${fuente}"]) {
+    sh '''
+      destino="$ENTREGAS/$FUENTE"
+      rm -rf "$destino" && mkdir -p "$destino"
+      cp -R reports/allure-results/. "$destino"/
+      echo "Entregado como fuente '$FUENTE'."
+      echo "Si es la primera vez, hay que darla de alta en el registro de fuentes."
+    '''
+    // Son DOS variables: `CARGADOR` es a quién, y `CARGADOR_ENTREGAS` es la
+    // misma carpeta de arriba VISTA DESDE ÉL, que casi nunca es la misma ruta.
+    // El identificador de fuente NO ES OPCIONAL: sin él la corrida entra como
+    // una fuente que nadie registró. Se mira el código en vez de dejar que
+    // `sh` lance: un post-proceso nunca falla una corrida buena.
+    if (env.CARGADOR && env.CARGADOR_ENTREGAS) {
+      def codigo = sh(returnStatus: true, script: '''
+        docker exec "$CARGADOR" python3 -m normalizador cargar \
+          "$CARGADOR_ENTREGAS/$FUENTE" --fuente-id "$FUENTE"
+      ''')
+      if (codigo != 0) {
+        echo "No la tomó (código ${codigo}). La corrida es válida y quedó " +
+             'entregada: la pasada automática la recoge.'
+      }
+    } else {
+      echo 'Esta máquina no declara a quién avisarle: la recoge el sondeo.'
     }
   }
 }
