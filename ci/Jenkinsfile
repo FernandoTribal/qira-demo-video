@@ -156,6 +156,12 @@ pipeline {
       // escribe dos veces. Una ruta del clon o una URL se sube a QORA; un
       // `storage:<id>` (ya en Sauce) pasa tal cual.
       //
+      // Lo que el proyecto necesite del aparato además de la app (una pantalla
+      // calibrada, otra app instalada al lado) tampoco va acá: ni `--pantalla`
+      // ni `--otra-app`. Es la preparación del proyecto, guardada en QORA y
+      // editable en su pantalla, y `prestamo.py` la aplica sola. Así cambiar
+      // de teléfono o de pantalla no pide tocar esta receta.
+      //
       // La llave del servicio llega como la credencial `qora-aparatos` y vive
       // sólo mientras dura cada paso. La cuenta de Sauce no pasa por acá nunca.
       steps {

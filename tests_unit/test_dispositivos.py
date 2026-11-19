@@ -123,15 +123,68 @@ def test_con_sauce_ios_no_pide_udid_pero_si_credenciales_y_app(sauce):
     assert f"{config.PREFIJO}_IPA" in faltan
 
 
-def test_sin_sauce_ios_sigue_pidiendo_el_udid(monkeypatch):
-    monkeypatch.setattr(config, "DISPOSITIVOS", "local")
-    monkeypatch.setattr(config, "EN_SAUCE", False)
-    monkeypatch.setattr(config, "APPIUM_CAPACIDADES", "")
+@pytest.fixture
+def local(monkeypatch):
+    """Una corrida en local, sin préstamo, con el Appium de esta máquina y lo
+    enchufado puesto a mano (ninguna prueba mira los aparatos de verdad)."""
+    from core import aparato_local
+
+    for nombre, valor in {
+        "DISPOSITIVOS": "local", "EN_SAUCE": False, "APPIUM_DE_QORA": False,
+        "APPIUM_CAPACIDADES": "", "APPIUM_URL": "http://127.0.0.1:4723",
+        "ANDROID_UDID": "", "IOS_UDID": "", "_DETECTADO": {},
+    }.items():
+        monkeypatch.setattr(config, nombre, valor)
+    enchufados = {"android": [], "ios": []}
+    monkeypatch.setattr(aparato_local, "android", lambda: enchufados["android"])
+    monkeypatch.setattr(aparato_local, "ios", lambda: enchufados["ios"])
+    return enchufados
+
+
+def test_sin_sauce_ios_sigue_pidiendo_el_udid_si_no_hay_ninguno(local, monkeypatch):
     monkeypatch.setattr(config, "PLATAFORMA", "ios")
     monkeypatch.setattr(config, "ES_IOS", True)
     monkeypatch.setattr(config, "BUNDLE_ID", "com.ejemplo.demo")
-    monkeypatch.setattr(config, "IOS_UDID", "")
     assert config.faltantes() == ["IOS_UDID"]
+
+
+def test_en_local_se_usa_el_iphone_enchufado(local, monkeypatch):
+    """Sin `IOS_UDID` escrito en ningún lado: el conectado gana al simulador."""
+    monkeypatch.setattr(config, "PLATAFORMA", "ios")
+    monkeypatch.setattr(config, "ES_IOS", True)
+    monkeypatch.setattr(config, "BUNDLE_ID", "com.ejemplo.demo")
+    local["ios"] += [("SIMULADOR-1", False), ("IPHONE-1", True)]
+    assert config.faltantes() == []
+    assert config.udid() == "IPHONE-1"
+
+
+def test_en_local_android_un_fisico_gana_al_emulador(local, monkeypatch):
+    monkeypatch.setattr(config, "ES_IOS", False)
+    local["android"] += [("emulator-5554", False), ("SERIAL-A", True)]
+    assert config.udid() == "SERIAL-A"
+    assert driver._opciones_android().udid == "SERIAL-A"
+
+
+def test_lo_fijado_o_lo_prestado_gana_y_no_se_detecta(local, monkeypatch):
+    monkeypatch.setattr(config, "ES_IOS", False)
+    local["android"] += [("SERIAL-A", True)]
+    monkeypatch.setattr(config, "ANDROID_UDID", "SERIAL-B")
+    assert config.udid() == "SERIAL-B"
+    # Con el Appium de QORA o de otra máquina, lo enchufado acá no cuenta.
+    monkeypatch.setattr(config, "ANDROID_UDID", "")
+    monkeypatch.setattr(config, "APPIUM_URL", "http://qora.ejemplo:4330/wd/" + "a" * 48)
+    assert config.udid() == ""
+
+
+def test_varios_o_ninguno_se_dice_en_una_linea():
+    from core.aparato_local import elegir
+
+    assert elegir([("SERIAL-A", True)]) == ("SERIAL-A", "")
+    udid, linea = elegir([])
+    assert udid == "" and "ningún" in linea and "\n" not in linea
+    udid, linea = elegir([("emulator-5554", False), ("SERIAL-A", True), ("SERIAL-B", True)])
+    assert udid == "SERIAL-A"
+    assert "\n" not in linea and "emulator-5554" in linea and "SERIAL-B" in linea
 
 
 def test_un_modo_de_dispositivos_raro_no_se_corrige(monkeypatch):

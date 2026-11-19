@@ -193,6 +193,28 @@ def test_la_receta_pide_el_aparato_a_qora_por_omision():
     # `label (…) …` lo lee el linter de Jenkins como `label(…)` y rechaza el agent.
     assert not re.search(r"agent\s*\{\s*label\s*\(", texto)
 
+
+def test_ningun_aparato_esta_escrito_en_la_suite():
+    """Evita que un serial, un UDID o la preparación del aparato vuelvan al
+    código: los teléfonos cambian y se configuran en la pantalla de QORA. Con
+    uno escrito, el día que se cambia el teléfono la corrida pide uno que ya
+    no está, y un `--pantalla` en la receta le ganaría a lo de QORA."""
+    receta = RAIZ / "ci" / "Jenkinsfile"
+    if not receta.is_file():
+        receta = RAIZ / "ci" / "Jenkinsfile"
+    # Los comentarios sí los nombran, para explicar por qué no van.
+    codigo = "\n".join(l for l in receta.read_text(encoding="utf-8").splitlines()
+                       if not l.strip().startswith("//"))
+    assert "--pantalla" not in codigo and "--otra-app" not in codigo
+    fijado = re.compile(r"\b(ANDROID_UDID|IOS_UDID|UDID)[ \t]*=[ \t]*['\"]?[\w-]{4,}")
+    archivos = [RAIZ / ".env.ejemplo", receta, RAIZ / "run.sh"]
+    archivos += [a for c in ("core", "flows", "screens", "tests", "data") for a in _py(c)]
+    for archivo in archivos:
+        if archivo.is_file():
+            texto = archivo.read_text(encoding="utf-8")
+            assert not fijado.search(texto), f"{archivo.relative_to(RAIZ)} fija un aparato"
+
+
 def test_el_clasificador_es_el_compartido_sin_editar():
     """Evita que «problema de ambiente» deje de significar lo mismo entre suites."""
     digest = hashlib.md5((RAIZ / "allure-categories.json").read_bytes()).hexdigest()

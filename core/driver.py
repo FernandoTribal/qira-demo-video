@@ -190,9 +190,10 @@ def _opciones_android():
     o.auto_grant_permissions = True
     o.new_command_timeout = 300
     # En la granja el aparato lo eligen las capacidades; un UDID de la mesa
-    # local que quedó en el `.env` pediría uno que allá no existe.
-    if config.ANDROID_UDID and not config.EN_SAUCE:
-        o.udid = config.ANDROID_UDID
+    # local que quedó en el `.env` pediría uno que allá no existe. En local, el
+    # del préstamo, el fijado o el enchufado (`config.udid()`), nunca uno escrito.
+    if config.udid():
+        o.udid = config.udid()
     return o
 
 
@@ -207,8 +208,8 @@ def _opciones_ios():
         o.app = config.IPA
     o.no_reset = True
     o.new_command_timeout = 300
-    if config.IOS_UDID and not config.EN_SAUCE:
-        o.udid = config.IOS_UDID
+    if config.udid():
+        o.udid = config.udid()
     return o
 
 
