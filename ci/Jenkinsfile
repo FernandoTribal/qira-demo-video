@@ -13,7 +13,22 @@ pipeline {
   // `labelString` del agente en `configuracion/jenkins.yaml` de PipelineQA:
   // hoy `android-emulator` e `ios-simulador`). Una etiqueta que nadie declara
   // deja la corrida en cola para siempre, sin error.
-  agent { label params.PLATAFORMA == 'ios' ? 'ios-simulador' : 'android-emulator' }
+  //
+  // Con el aparato PRESTADO por QORA (`DISPOSITIVOS` distinto de `local`, ver
+  // `prestado()` abajo) la suite le habla a una dirección de QORA, que reenvía
+  // al Appium de la estación que tenga el aparato o a Sauce Labs: no hace falta
+  // que el aparato esté en ESTA máquina. Cualquiera con Python sirve (la del
+  // servidor, que no tiene KVM ni Xcode), y lo único que necesita es llegar al
+  // servicio de aparatos y tener el paso de préstamo (`QORA_PRESTAMO`, lo deja
+  // `./agente.sh alta`). La condición es la de `prestado()`, escrita acá en
+  // línea porque `agent` se evalúa antes que nada y no se apuesta a que vea
+  // las funciones del archivo. El vacío (el primer «Construir ahora», sin
+  // parámetros todavía) no es `local`: cuenta como `auto`, la primera del
+  // desplegable. La expresión empieza por `params` y no por un paréntesis: con
+  // `label (…) != …` el linter de Jenkins lee `label(…)` como la llamada entera
+  // y rechaza el `agent` («Expected an agent»).
+  agent { label params.DISPOSITIVOS == 'local' ?
+                (params.PLATAFORMA == 'ios' ? 'ios-simulador' : 'android-emulator') : 'python' }
 
   options {
     timestamps()
@@ -31,6 +46,37 @@ pipeline {
            description: 'Qué correr. La primera no corre nada: sirve para que la plataforma recupere este desplegable sin tocar el ambiente.')
     choice(name: 'PLATAFORMA', choices: ['android', 'ios'],
            description: 'Contra qué se corre. <code>ios</code> corre en el simulador de una Mac con Xcode.')
+    // Dónde está el aparato. La receta lo decide y lo exporta: gana al
+    // `DISPOSITIVOS` del `.env`, porque de esto dependen el agente y el candado
+    // que se piden.
+    //
+    // Desde noviembre de 2026 las corridas usan EL MISMO CATÁLOGO que QIRA al
+    // armar: todo lo que no es `local` se le pide prestado a QORA
+    // (`aparatos/prestamo.py` de PipelineQA, contrato en
+    // `docs/CONTRATO_APARATOS.md`):
+    //
+    //   auto      el orden automático del proyecto en QORA (por omisión:
+    //             emulador de una estación y, si están ocupados, Sauce). Se
+    //             cambia en QORA, sin tocar esta receta.
+    //   estacion  el emulador o simulador de una estación (la de ESTACION, si se pone)
+    //   fisico    un teléfono Android enchufado a una estación
+    //   sauce     un emulador o simulador de Sauce Labs. La cuenta la pone QORA:
+    //             la suite no la recibe, y ya no hace falta la credencial `sauce-labs`.
+    //   local     como antes: el Appium de este agente, con su `lock()`.
+    //
+    // `auto` va PRIMERO, a diferencia de la plantilla: el trabajo `calendario`
+    // dispara esta receta pasando sólo SUITE, así que las corridas programadas
+    // toman la primera opción. Con el Appium de la estación «a demanda» (lo
+    // enciende QORA al prestar), `local` por omisión dejaría a esas corridas
+    // sin Appium. `local` queda para quien lo pida a mano, pero no comparte el
+    // orden ni la fila con QIRA más que por el candado.
+    choice(name: 'DISPOSITIVOS', choices: ['auto', 'estacion', 'fisico', 'sauce', 'local'],
+           description: 'Dónde está el aparato. <code>auto</code>: el que dé QORA según el orden del proyecto. <code>estacion</code>, <code>fisico</code>, <code>sauce</code>: de esa fuente, prestado por QORA. <code>local</code>: el de este agente.')
+    // Un desplegable no puede listar las estaciones (las conoce QORA, no la
+    // receta): el nombre va aparte y convierte `auto`/`estacion` en
+    // `estacion:<nombre>`.
+    string(name: 'ESTACION', defaultValue: '',
+           description: 'Opcional, con <code>auto</code> o <code>estacion</code>: la máquina de aparatos que se quiere.')
     // Una casilla que promete detener algo y no está cableada es peor que no
     // tenerla (§13.9): la conecta el `--efectos` de la etapa `Suite`.
     booleanParam(name: 'PERMITIR_EFECTOS', defaultValue: false,
@@ -46,6 +92,15 @@ pipeline {
     // A `run.sh` y al manifiesto por la misma puerta: si sólo lo supiera la
     // receta, se correría en un aparato y se entregaría como el otro.
     PLATAFORMA = "${params.PLATAFORMA}"
+    // Lo que entiende `core/config.py` (`local` | `sauce`) hasta que el
+    // préstamo diga dónde quedó el aparato: con `auto` puede ser cualquiera de
+    // los dos, y lo pisa el entorno del préstamo en la etapa Suite. `?:`
+    // porque en el primer «Construir ahora» todavía no hay parámetros, y un
+    // `null` llegaría a `config.py` como texto.
+    DISPOSITIVOS = "${params.DISPOSITIVOS == 'sauce' ? 'sauce' : 'local'}"
+    // El nombre de esta corrida: agrupa sus sesiones en Sauce y es lo que se
+    // ve en el candado de Jenkins mientras QORA le presta el aparato.
+    SAUCE_BUILD = "${env.JOB_NAME} #${env.BUILD_NUMBER}"
   }
 
   stages {
@@ -60,6 +115,10 @@ pipeline {
       when { expression { params.SUITE != 'despertar' } }
       steps {
         sh 'git log -1 --oneline'
+        // Los resultados de una corrida anterior quedan en el espacio de
+        // trabajo. Si ésta no llega a la suite, el `post` los entregaría a QIVA
+        // como si fueran de hoy: una corrida fantasma en verde. Se borran antes.
+        sh 'rm -rf reports/allure-results reports/junit.xml .prestamo'
         // Un clon limpio NO trae `.env`: son credenciales. Las entrega el CI y
         // se borran en `cleanup`, pase lo que pase.
         withCredentials([file(credentialsId: 'app-movil-demo-dotenv', variable: 'DOTENV')]) {
@@ -75,7 +134,62 @@ pipeline {
       // sentido tocar un teléfono para averiguarlo.
       steps {
         sh './run.sh --suites'
-        sh './run.sh --unitarias'
+        // Sin `DISPOSITIVOS`: Jenkins pone cada parámetro en el entorno, y con
+        // `sauce` las pruebas unitarias de la evidencia (que verifican el video
+        // LOCAL) leerían la granja y fallarían sin que nada esté roto.
+        sh 'env -u DISPOSITIVOS ./run.sh --unitarias'
+      }
+    }
+
+    stage('Pedir el aparato') {
+      when { expression { params.SUITE != 'despertar' && prestado() } }
+      // Lo pide a QORA como QIRA al armar: QORA elige según el orden del
+      // proyecto, toma el MISMO candado que piden los `lock()` de las recetas
+      // (por la API de lockable-resources), enciende si hace falta e instala la
+      // app. Si el aparato está ocupado, la corrida espera acá diciendo detrás
+      // de quién. Todo eso lo hace `prestamo.py` del agente, no esta receta:
+      // ver su cabecera (por qué un paso compartido y no cien líneas copiadas
+      // en cada suite).
+      //
+      // Lo que pide la suite (`<PREFIJO>_APK` o `_IPA`, el túnel) lo dice
+      // `core/config.py`, no esta receta: así el nombre de la variable no se
+      // escribe dos veces. Una ruta del clon o una URL se sube a QORA; un
+      // `storage:<id>` (ya en Sauce) pasa tal cual.
+      //
+      // La llave del servicio llega como la credencial `qora-aparatos` y vive
+      // sólo mientras dura cada paso. La cuenta de Sauce no pasa por acá nunca.
+      steps {
+        script {
+          if (!env.QORA_PRESTAMO) {
+            error('Esta máquina no tiene el paso de préstamo de QORA (falta QORA_PRESTAMO). ' +
+                  'Hay que volver a correr ./agente.sh alta en ella, con PipelineQA al día.')
+          }
+        }
+        withCredentials([string(credentialsId: 'qora-aparatos', variable: 'QORA_APARATOS_LLAVE')]) {
+          withEnv(["FUENTE=${fuenteDelPrestamo()}"]) {
+            sh '''
+              set -eu
+              # En dos pasos y no `eval "$(…)"`: así, si Python falla, `set -e`
+              # corta acá con su error, en vez de seguir con las variables vacías.
+              declarado="$(.venv/bin/python - <<'PY'
+from shlex import quote
+from core import config
+variable, crudo = config.binario_declarado()
+print(f"VARIABLE={quote(variable)} CRUDO={quote(crudo)} "
+      f"TUNEL={quote(config.SAUCE_TUNEL)} TUNEL_DUENO={quote(config.SAUCE_TUNEL_DUENO)}")
+PY
+)"
+              eval "$declarado"
+              # El proyecto es la carpeta de Jenkins: es el nombre con que QORA
+              # guarda su orden automático.
+              python3 "$QORA_PRESTAMO" pedir \
+                --proyecto "${JOB_NAME%%/*}" --plataforma "$PLATAFORMA" \
+                --fuente "$FUENTE" --proposito "$PROPOSITO" --corrida "$SAUCE_BUILD" \
+                --app "$CRUDO" --app-variable "$VARIABLE" \
+                --tunel "$TUNEL" --tunel-dueno "$TUNEL_DUENO"
+            '''
+          }
+        }
       }
     }
 
@@ -100,7 +214,22 @@ pipeline {
           // escritos así, y lee también los comentarios (no citar acá la
           // llamada). Un proyecto con un aparato PROPIO declara el suyo en la
           // plataforma y lo pide por su nombre.
-          if (params.PLATAFORMA == 'ios') {
+          //
+          // Con el aparato PRESTADO no hay `lock()`: el candado ya lo tiene el
+          // préstamo (QORA lo pidió a Jenkins con la API de lockable-resources,
+          // en la misma fila que los `lock()`), y uno acá esperaría para
+          // siempre al propio préstamo. Lo mismo con la granja: el candado de
+          // su cuota lo toma QORA. La suite corre con el entorno del préstamo
+          // (`APPIUM_URL` de QORA, las capacidades, `DISPOSITIVOS` real) y
+          // `prestamo.py correr` late mientras dura y le saca la llave del
+          // servicio del entorno: la suite no la necesita.
+          if (prestado()) {
+            def entorno = []
+            for (linea in readFile('.prestamo/entorno').trim().split('\n')) { entorno.add(linea) }
+            withCredentials([string(credentialsId: 'qora-aparatos', variable: 'QORA_APARATOS_LLAVE')]) {
+              withEnv(entorno) { sh "python3 \"\$QORA_PRESTAMO\" correr -- ${comando}" }
+            }
+          } else if (params.PLATAFORMA == 'ios') {
             lock('dispositivo-ios-simulador') { sh comando }
           } else {
             lock('dispositivo-android-emulador') { sh comando }
@@ -113,6 +242,13 @@ pipeline {
   post {
     always {
       script {
+        // Lo primero: devolver el aparato, para que la corrida siguiente (o un
+        // armado de QIRA) no espere a que se publiquen los reportes. Se mira el
+        // archivo y no el parámetro: si el pedido llegó a hacerse, hay que
+        // devolverlo, aunque la corrida se haya cancelado en la fila.
+        if (fileExists('.prestamo/id')) {
+          devolverPrestamo()
+        }
         // Todo tras la condición, no sólo la entrega: una carpeta vacía es peor
         // que ninguna, quien acumula publicaría una corrida fantasma (§8).
         if (params.SUITE == 'despertar') {
@@ -130,8 +266,7 @@ pipeline {
           // silencio (`movil-e2e` acá, `app-e2e` en el manifiesto, 2026-10-26).
           //
           // `|| true` y la pregunta de abajo: sin `suite.base.json` no hay con qué
-          // nombrar la entrega, y eso se dice; no tira el `post` entero. Cómo se
-          // entrega lo decide la máquina: ver `entregar` al final.
+          // nombrar la entrega, y eso se dice; no tira el `post` entero.
           def suiteBase = sh(returnStdout: true, script:
             "python3 -c 'import json; print(json.load(open(\"suite.base.json\"))[\"suite\"])' || true").trim()
           if (suiteBase) {
@@ -143,8 +278,54 @@ pipeline {
       }
     }
     cleanup {
-      sh 'rm -f .env'   // que las credenciales no vivan en el workspace
+      // Que las credenciales no vivan en el workspace (ni la dirección del préstamo).
+      sh 'rm -rf .env .prestamo'
     }
+  }
+}
+
+// ── El aparato prestado por QORA ────────────────────────────────────────────
+// Fuera del `pipeline` por lo mismo que `entregar()`: se usan en varias
+// etapas, y la regla escrita dos veces es la que diverge.
+
+// ¿El aparato lo presta QORA? Todo lo que no es `local`. El vacío (el primer
+// «Construir ahora» de un trabajo nuevo no trae parámetros) cuenta como `auto`,
+// la primera del desplegable, igual que en el `agent` de arriba.
+def prestado() {
+  def d = params.DISPOSITIVOS ?: 'auto'
+  return d != 'local'
+}
+
+// La `fuente` del pedido: el valor del desplegable, o `estacion:<nombre>` si
+// se eligió una máquina en ESTACION.
+def fuenteDelPrestamo() {
+  def d = params.DISPOSITIVOS ?: 'auto'
+  def estacion = params.ESTACION?.trim()
+  if (estacion && (d == 'auto' || d == 'estacion')) {
+    return "estacion:${estacion}"
+  }
+  return d
+}
+
+// Devuelve el aparato con el resultado de la corrida, que en Sauce QORA marca
+// en la sesión (la suite no tiene la cuenta para hacerlo). Cancelada, sin
+// resultado: no se sabe. Nunca falla el `post`: si QORA no contesta, el
+// préstamo vence solo sin latido en unos minutos.
+def devolverPrestamo() {
+  if (!env.QORA_PRESTAMO) {
+    echo 'Esta máquina no tiene el paso de préstamo de QORA: el aparato vence solo sin latido.'
+    return
+  }
+  def r = currentBuild.currentResult
+  def resultado = r == 'SUCCESS' ? 'paso' : ((r == 'FAILURE' || r == 'UNSTABLE') ? 'fallo' : '')
+  try {
+    withCredentials([string(credentialsId: 'qora-aparatos', variable: 'QORA_APARATOS_LLAVE')]) {
+      withEnv(["RESULTADO=${resultado}"]) {
+        sh 'python3 "$QORA_PRESTAMO" devolver --resultado "$RESULTADO"'
+      }
+    }
+  } catch (err) {
+    echo "No se pudo devolver el aparato (${err}); vence solo sin latido en unos minutos."
   }
 }
 

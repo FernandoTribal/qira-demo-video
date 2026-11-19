@@ -107,7 +107,7 @@ def v(request):
 
 
 @pytest.fixture(scope="session")
-def _driver():
+def _driver(request):
     """Uno por corrida: abrir la sesión cuesta segundos.
 
     La guarda se repite acá porque pytest arma las fixtures de sesión ANTES que
@@ -116,8 +116,14 @@ def _driver():
     motivo = _motivo_de_ambiente()
     if motivo:
         pytest.skip(motivo)
-    d = driver.abrir()
+    # El nombre con el que se ve la sesión en Sauce: una sesión por corrida, así
+    # que nombra la corrida y no un caso. Con un aparato local no se usa.
+    suite = request.config.getoption("--suite") or "sin suite"
+    d = driver.abrir(nombre=f"{suite} · {ajustes.PLATAFORMA}")
     yield d
+    # Lo que la granja muestra como resultado de la sesión: rojo si falló algún
+    # caso. Sin aparato de granja no hace nada.
+    driver.marcar_resultado(d, request.session.testsfailed == 0)
     d.quit()
 
 
@@ -130,6 +136,7 @@ def app(_driver, request):
     Acá y no en cada caso: un caso no toca el driver.
     """
     sesion = driver.Sesion(_driver)
+    evidencia.enlazar_sesion(driver.enlace_sesion(_driver))
     with evidencia.del_caso(request.node, sesion):
         sesion.reiniciar_app()
         yield sesion
@@ -175,6 +182,9 @@ def pytest_runtest_makereport(item, call):
 # ── El cierre: el manifiesto (§6) ──────────────────────────────────────────
 
 def pytest_sessionfinish(session, exitstatus) -> None:
+    # En Sauce, el resultado de la sesión por la API, con el recuento cerrado.
+    # Antes que la condición de abajo: también vale para una corrida a mano.
+    driver.marcar_por_api(session.testsfailed == 0)
     # Sólo una corrida de verdad entrega: ni `--collect-only` ni la batería de
     # coherencia (que corre sin `--alluredir`) producen resultados que contar.
     if session.config.option.collectonly or not session.config.getoption(
