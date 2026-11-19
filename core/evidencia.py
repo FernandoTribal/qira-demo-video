@@ -97,7 +97,10 @@ def del_caso(item, sesion):
 
 
 def _empezar_video(sesion) -> bool:
-    if modo_video() == "nunca" or _SIN_VIDEO["motivo"]:
+    # En Sauce la granja graba su propio video de la sesión entera, y el
+    # reporte lleva el enlace (`enlazar_sesion`). Grabar además acá pagaría dos
+    # veces lo mismo y, en iOS, pediría un ffmpeg que la granja no tiene.
+    if modo_video() == "nunca" or _SIN_VIDEO["motivo"] or config.EN_SAUCE:
         return False
     try:
         sesion.empezar_grabacion(LIMITE_VIDEO_S)
@@ -116,6 +119,17 @@ def _terminar_video(sesion):
         return sesion.terminar_grabacion()
     except Exception:
         return None  # se pierde el video; no se inventa un fallo
+
+
+def enlazar_sesion(url: str) -> None:
+    """El enlace a la sesión en la granja, en el reporte de cada caso que usó
+    la app: ahí está el video y el registro de Appium. Nunca lanza."""
+    if not url or allure is None:
+        return
+    try:
+        allure.dynamic.link(url, name="Sesión en Sauce Labs")
+    except Exception:
+        pass
 
 
 # ── El hook: adjuntar ──────────────────────────────────────────────────────

@@ -171,6 +171,28 @@ def test_la_receta_ofrece_las_suites_y_despertar_primero():
     assert set(ofrecidas) == set(SUITES) | {DESPERTAR}
 
 
+
+def test_la_receta_pide_el_aparato_a_qora_por_omision():
+    """Evita que una corrida programada quede sin Appium: el `calendario` sólo
+    pasa SUITE, así que corre con la primera opción de DISPOSITIVOS, y el
+    Appium de la estación se enciende a demanda cuando QORA lo presta. También
+    que la receta vuelva a hablarle a Sauce por su cuenta: eso lo hace QORA."""
+    texto = (RAIZ / "ci" / "Jenkinsfile").read_text(encoding="utf-8")
+    m = re.search(r"choice\(\s*name:\s*'DISPOSITIVOS'\s*,\s*choices:\s*\[(.+?)\]", texto, re.S)
+    assert m, "no encontré el desplegable DISPOSITIVOS en la receta"
+    ofrecidas = re.findall(r"'([^']+)'", m.group(1))
+    assert ofrecidas[0] == "auto"
+    assert set(ofrecidas) == {"auto", "estacion", "fisico", "sauce", "local"}
+    # El vacío (el primer «Construir ahora») vale lo mismo que la primera opción
+    # en el `agent` y en `prestado()`/`fuenteDelPrestamo()`.
+    vacios = re.findall(r"params\.DISPOSITIVOS\s*\?:\s*'([^']+)'", texto)
+    assert vacios and set(vacios) == {"auto"}, vacios
+    assert "credentialsId: 'sauce-labs'" not in texto
+    assert "lock('granja-sauce')" not in texto
+    assert "devolverPrestamo()" in texto and "prestamo.py" in texto
+    # `label (…) …` lo lee el linter de Jenkins como `label(…)` y rechaza el agent.
+    assert not re.search(r"agent\s*\{\s*label\s*\(", texto)
+
 def test_el_clasificador_es_el_compartido_sin_editar():
     """Evita que «problema de ambiente» deje de significar lo mismo entre suites."""
     digest = hashlib.md5((RAIZ / "allure-categories.json").read_bytes()).hexdigest()
