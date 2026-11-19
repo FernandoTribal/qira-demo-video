@@ -350,6 +350,15 @@ def entregar(String fuente) {
     entregarDesdeAca(fuente)   // como siempre: esta máquina ve al cargador
     return
   }
+  // Si esta máquina ya es la de QIVA, se entrega desde acá mismo. Pedir
+  // `node('qiva')` desde un `post` que ya ocupa un ejecutor de ESTA máquina se
+  // traba: el 2026-11-19 la corrida programada de AGORA y una de APS llegaron
+  // al `post` a la vez, cada una con uno de los dos ejecutores, y cada una se
+  // quedó esperando el de la otra hasta el techo de 30 minutos, sin entregar.
+  if ((env.NODE_LABELS ?: '').tokenize().contains('qiva')) {
+    entregarDesdeAca(fuente)
+    return
+  }
   stash name: 'entrega-qiva', includes: 'reports/allure-results/**', allowEmpty: true
   // Con techo: si ningún nodo declara `qiva` (o están todos ocupados), la
   // corrida no puede quedar en cola para siempre esperando un post-proceso. Y
