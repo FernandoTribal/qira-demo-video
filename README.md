@@ -33,8 +33,8 @@ llegan como el secreto `app-movil-demo-dotenv`.
 | `AMBIENTE` | contra qué ambiente se corre |
 | `PLATAFORMA` | `android` o `ios` (la pone `run.sh`) |
 | `APP_PAQUETE` · `APP_ACTIVIDAD` · `APP_APK` | la app en Android |
-| `APP_BUNDLE_ID` · `IOS_UDID` | la app y el teléfono en iOS |
-| `APPIUM_URL` · `ANDROID_UDID` | el servidor y el teléfono |
+| `APP_BUNDLE_ID` · `IOS_UDID` | la app y, si hay varios enchufados, cuál de ellos en iOS (vacío: el que detecten `devicectl` / `simctl`) |
+| `APPIUM_URL` · `ANDROID_UDID` | el servidor y, si hay varios enchufados, cuál (vacío: el que vea `adb`). Ningún aparato se escribe en la suite: el del CI se elige en la pantalla de QORA |
 | `APP_URL` · `APP_<CLAVE>_URL` | los sistemas web que la suite también toca |
 | `APP_<ROL>_USUARIO` · `APP_<ROL>_CLAVE` | una cuenta por rol |
 | `EVIDENCIA_VIDEO` | `fallos` (por omisión) · `siempre` · `nunca`: cuándo va el video al reporte (ver abajo) |

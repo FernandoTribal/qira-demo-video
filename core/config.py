@@ -141,11 +141,16 @@ APPIUM_DE_QORA = _v("APPIUM_DE_QORA").lower() in ("1", "si", "sí", "true")
 # roto no puede romper el import (ver el docstring del módulo).
 APPIUM_CAPACIDADES = _v("APPIUM_CAPACIDADES")
 
+# El aparato concreto. NO se escribe en la suite ni en el `.env.ejemplo`: los
+# teléfonos cambian, y el del CI se elige en la pantalla de QORA, que lo pone
+# acá al prestarlo. En local, vacío es lo normal: `udid()` mira lo enchufado
+# (`core/aparato_local.py`). Ponerlo en el `.env` sólo para fijar uno cuando
+# hay varios.
 ANDROID_UDID = _v("ANDROID_UDID")
 # En iOS el UDID no es opcional en la práctica con un aparato propio: sin él
-# XCUITest se va a un SIMULADOR, que no tiene el build que se libera. Lo exige
-# `faltantes()`. En Sauce no hay UDID que dar: el simulador lo elige la granja
-# por las capacidades.
+# XCUITest se va a un SIMULADOR, que no tiene el build que se libera. Si no se
+# detecta ninguno, lo exige `faltantes()`. En Sauce no hay UDID que dar: el
+# simulador lo elige la granja por las capacidades.
 IOS_UDID = _v("IOS_UDID")
 
 # Lo que se probó. Lo pone el CI; a mano queda «sin declarar», que se reclama.
@@ -161,8 +166,33 @@ EVIDENCIA_VIDEO = _v("EVIDENCIA_VIDEO", "fallos").lower()
 MODOS_DE_VIDEO = ("fallos", "siempre", "nunca")
 
 
+_DETECTADO: dict = {}
+
+
 def udid() -> str:
-    return IOS_UDID if ES_IOS else ANDROID_UDID
+    """El aparato al que se le abre la sesión, o vacío.
+
+    El de la variable si está (lo pone QORA al prestar, o quien fija uno a
+    mano); si no, el que esté enchufado a ESTA máquina. Sólo se detecta con el
+    Appium de esta máquina: con uno de QORA o de otra, lo que vea `adb` acá no
+    es lo que tiene ese Appium. En Sauce, nunca: el aparato lo eligen las
+    capacidades. Se detecta una vez por corrida (la línea de aviso, también)."""
+    if EN_SAUCE:
+        return ""
+    fijo = IOS_UDID if ES_IOS else ANDROID_UDID
+    if fijo or APPIUM_DE_QORA or not _appium_de_esta_maquina():
+        return fijo
+    if ES_IOS not in _DETECTADO:
+        from core import aparato_local
+
+        _DETECTADO[ES_IOS] = aparato_local.detectar(ES_IOS)
+    return _DETECTADO[ES_IOS]
+
+
+def _appium_de_esta_maquina() -> bool:
+    from urllib.parse import urlparse
+
+    return (urlparse(APPIUM_URL).hostname or "") in ("127.0.0.1", "localhost", "::1")
 
 
 def capacidades_extra() -> dict:
@@ -205,7 +235,8 @@ def faltantes() -> list[str]:
     if ES_IOS:
         pedidas = {f"{PREFIJO}_BUNDLE_ID": BUNDLE_ID}
         if not EN_SAUCE:
-            pedidas["IOS_UDID"] = IOS_UDID
+            # El de la variable o el detectado: sólo falta si no hay ninguno.
+            pedidas["IOS_UDID"] = udid()
     else:
         pedidas = {f"{PREFIJO}_PAQUETE": PAQUETE, f"{PREFIJO}_ACTIVIDAD": ACTIVIDAD}
     if EN_SAUCE:
