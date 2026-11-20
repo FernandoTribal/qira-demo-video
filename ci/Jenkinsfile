@@ -204,7 +204,8 @@ PY
       steps {
         script {
           def efectos = params.PERMITIR_EFECTOS ? ' --efectos' : ''
-          def sueltos = params.EXTRA?.trim() ? ' ' + params.EXTRA.trim() : ''
+          def sueltos = citarArgumentos(params.EXTRA)
+          if (sueltos == null) { error('EXTRA tiene una comilla sin cerrar.') }
           def comando = "./run.sh ${params.SUITE}${efectos}${sueltos} --junitxml=reports/junit.xml"
           // El candado se llama como el RECURSO (el aparato), no como la
           // máquina, y hay uno por plataforma: el emulador Android y el
@@ -420,4 +421,41 @@ def entregarDesdeAca(String fuente) {
       echo 'Esta máquina no declara a quién avisarle: la recoge el sondeo.'
     }
   }
+}
+
+// Los argumentos libres de EXTRA, citados uno por uno. Antes se pegaban tal cual
+// dentro de `sh "…"`, y algo como `; cat .env` se EJECUTABA en el agente con
+// todos sus secretos a mano (auditoría de seguridad del 2026-11-20, ECO-003).
+// Ahora se parten como lo haría el shell —los espacios separan, las comillas
+// '…' y "…" agrupan— y cada pedazo va entre comillas simples: el shell lo
+// recibe como texto, nunca como orden. `-k "a or b"` llega igual que antes;
+// `$( )`, `;`, `|` o `*` llegan literales. Devuelve null si queda una comilla
+// abierta (el que llama corta la corrida con el motivo). Sin pasos de Jenkins
+// adentro, por eso puede ser @NonCPS.
+@NonCPS
+String citarArgumentos(def texto) {
+  String crudo = texto == null ? '' : texto.toString()
+  List partes = []
+  String actual = ''
+  boolean hay = false
+  String comilla = null
+  for (int i = 0; i < crudo.length(); i++) {
+    String c = crudo.substring(i, i + 1)
+    if (comilla != null) {
+      if (c == comilla) { comilla = null } else { actual = actual + c }
+    } else if (c == "'" || c == '"') {
+      comilla = c
+      hay = true
+    } else if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+      if (hay) { partes.add(actual); actual = ''; hay = false }
+    } else {
+      actual = actual + c
+      hay = true
+    }
+  }
+  if (comilla != null) { return null }
+  if (hay) { partes.add(actual) }
+  String salida = ''
+  for (String p in partes) { salida = salida + " '" + p.replace("'", "'\"'\"'") + "'" }
+  return salida
 }
